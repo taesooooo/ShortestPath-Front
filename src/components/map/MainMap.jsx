@@ -1,4 +1,4 @@
-import { Map, View } from "ol";
+import { Feature, Map, View } from "ol";
 import Layer from "ol/layer/Layer";
 import { OSM, Vector, XYZ } from "ol/source";
 
@@ -7,18 +7,26 @@ import { useEffect, useRef, useState } from "react";
 import TileLayer from "ol/layer/Tile";
 import ControlContainer from "./controls/ControlContainer";
 import ContextMenu from "./ContextMenu";
-import { fromLonLat, transformExtent } from "ol/proj";
+import { fromLonLat, toLonLat, transformExtent } from "ol/proj";
 import { GeoJSON } from "ol/format";
 import { bbox } from "ol/loadingstrategy";
 import VectorLayer from "ol/layer/Vector";
 import Icon from "ol/style/Icon";
-import { LuAArrowDown } from "react-icons/lu";
+import { LuAArrowDown, LuMapPin } from "react-icons/lu";
 import { unByKey } from "ol/Observable";
+import VectorSource from "ol/source/Vector";
+import Style from "ol/style/Style";
+import { makeRegular } from "ol/geom/Polygon";
+import { Point } from "ol/geom";
 
 const MainMap = () => {
     const mapRef = useRef(null);
     const [zoomLevel, setZoomLevel] = useState(1);
     const [menuConfig, setMenuConfig] = useState({ isVisible: false, x: 0, y: 0 });
+    const [isMarkerCreating, setMarkerCreating] = useState(false);
+    const markerLayerRef = useRef(null);
+    const [startMarker, setStartMarker] = useState({ lat: null, lon: null });
+    const [endMarker, setEndMarker] = useState({ lat: null, lon: null });
 
     useEffect(() => {
         const map = new Map({
@@ -106,9 +114,97 @@ const MainMap = () => {
         }
     };
 
+    const newMarker = (type = "blue") => {
+        const map = mapRef.current;
+        const markerLayer = markerLayerRef.current;
+        const layerSource = markerLayer?.getSource();
+        const id = type === "blue" ? 1 : 2;
+
+        const markerFeature = layerSource?.getFeatureById(id);
+        if (markerFeature != null) {
+            layerSource.removeFeature(markerFeature);
+        }
+
+        const marker = new Feature({
+            geometry: new Point(0, 0),
+        });
+
+        // 블루면 시작, 레드면 종료 마커 설정
+        marker.set("type", type === "blue" ? "start" : "end");
+        marker.setId(type === "blue" ? 1 : 2);
+
+        const markerStyle = new Style({
+            image: new Icon({
+                src: `/map-pin-${type}.svg`,
+                scale: 1,
+                anchor: [0.5, 1],
+            }),
+        });
+        marker.setStyle(markerStyle);
+
+        // 마커 레이어가 없으면 새로 생성 후 마커 피쳐 추가
+        if (markerLayer === null) {
+            const layer = new VectorLayer({
+                source: new VectorSource({
+                    features: [marker],
+                }),
+            });
+
+            map.addLayer(layer);
+            markerLayerRef.current = layer;
+        } else {
+            markerLayer.getSource().addFeature(marker);
+        }
+
+        return marker;
+    };
+
+    const markerCreate = (makerFinalizeClick, type) => {
+        const map = mapRef.current;
+        // const initCoordinate = toLonLat(map.getCoordinateFromPixel([e.pageX, e.pageY]));
+        const marker = newMarker(type);
+        const keys = [];
+
+        keys.push(
+            map.on("pointermove", (e) => {
+                const coordinate = e.coordinate;
+                marker.getGeometry().setCoordinates(coordinate);
+            })
+        );
+
+        keys.push(
+            map.on("click", (e) => {
+                keys.forEach((key) => unByKey(key));
+                const finalCoordinate = toLonLat(e.coordinate);
+                makerFinalizeClick(finalCoordinate);
+                setMarkerCreating(false);
+            })
+        );
+    };
+
+    const handleStartMarker = (e) => {
+        if (isMarkerCreating) return;
+
+        markerCreate((finalCoordinate) => {
+            setStartMarker({ lat: finalCoordinate[1], lon: finalCoordinate[0] });
+        }, "blue");
+
+        setMarkerCreating(true);
+    };
+
+    const handleEndMarker = (e) => {
+        if (isMarkerCreating) return;
+
+        markerCreate((finalCoordinate) => {
+            setEndMarker({ lat: finalCoordinate[1], lon: finalCoordinate[0] });
+        }, "red");
+
+        setMarkerCreating(true);
+    };
+
     return (
         <div ref={mapRef} id="map-container">
-            <ControlContainer zoomLevel={zoomLevel} onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} />
+            <ControlContainer zoomLevel={zoomLevel} onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} onStartMarker={handleStartMarker} onEndMarker={handleEndMarker} />
             <ContextMenu menuConfig={menuConfig} item={[{ icon: LuAArrowDown, name: "테스트" }, { name: "테스트" }, { name: "테스트" }]} />
         </div>
     );
