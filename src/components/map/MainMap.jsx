@@ -18,6 +18,8 @@ import VectorSource from "ol/source/Vector";
 import Style from "ol/style/Style";
 import { makeRegular } from "ol/geom/Polygon";
 import { Point } from "ol/geom";
+import { useDispatch } from "react-redux";
+import { findRoute } from "../../store/routeSearchSlice";
 
 const MainMap = () => {
     const mapRef = useRef(null);
@@ -27,6 +29,8 @@ const MainMap = () => {
     const markerLayerRef = useRef(null);
     const [startMarker, setStartMarker] = useState({ lat: null, lon: null });
     const [endMarker, setEndMarker] = useState({ lat: null, lon: null });
+
+    const dispatch = useDispatch();
 
     useEffect(() => {
         const map = new Map({
@@ -196,7 +200,9 @@ const MainMap = () => {
         if (isMarkerCreating) return;
 
         markerCreate((finalCoordinate) => {
-            setEndMarker({ lat: finalCoordinate[1], lon: finalCoordinate[0] });
+            const endCoordinate = { lat: finalCoordinate[1], lon: finalCoordinate[0] };
+            setEndMarker(endCoordinate);
+            dispatch(findRoute({ start: startMarker, end: endCoordinate }));
         }, "red");
 
         setMarkerCreating(true);
