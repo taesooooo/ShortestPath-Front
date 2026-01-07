@@ -1,0 +1,7 @@
+{
+    "compilerOptions": {
+        "jsx": "react-jsx"
+        // "checkJs": true
+    },
+    "include": ["src", "node_modules"]
+}
