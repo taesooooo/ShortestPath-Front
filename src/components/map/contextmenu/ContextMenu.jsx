@@ -1,4 +1,4 @@
-import ContextItem from "./contextmenu/ContextItem";
+import ContextItem from "./ContextItem";
 
 const ContextMenu = ({ menuConfig, item }) => {
     if (menuConfig.isVisible === false) {

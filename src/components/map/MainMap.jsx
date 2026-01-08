@@ -1,12 +1,12 @@
 import { Feature, Map, View } from "ol";
 import Layer from "ol/layer/Layer";
-import { OSM, Vector, XYZ } from "ol/source";
+import { OSM, Source, Vector, XYZ } from "ol/source";
 
 import "ol/ol.css";
 import { useEffect, useRef, useState } from "react";
 import TileLayer from "ol/layer/Tile";
 import ControlContainer from "./controls/ControlContainer";
-import ContextMenu from "./ContextMenu";
+import ContextMenu from "./contextmenu/ContextMenu";
 import { fromLonLat, toLonLat, transformExtent } from "ol/proj";
 import { GeoJSON } from "ol/format";
 import { bbox } from "ol/loadingstrategy";
@@ -15,11 +15,13 @@ import Icon from "ol/style/Icon";
 import { LuAArrowDown, LuMapPin } from "react-icons/lu";
 import { unByKey } from "ol/Observable";
 import VectorSource from "ol/source/Vector";
-import Style from "ol/style/Style";
+import { Style, Circle } from "ol/style";
 import { makeRegular } from "ol/geom/Polygon";
-import { Point } from "ol/geom";
-import { useDispatch } from "react-redux";
+import { LineString, MultiPoint, Point } from "ol/geom";
+import { useDispatch, useSelector } from "react-redux";
 import { findRoute } from "../../store/routeSearchSlice";
+import Stroke from "ol/style/Stroke";
+import Fill from "ol/style/Fill";
 
 const MainMap = () => {
     const mapRef = useRef(null);
@@ -29,18 +31,31 @@ const MainMap = () => {
     const markerLayerRef = useRef(null);
     const [startMarker, setStartMarker] = useState({ lat: null, lon: null });
     const [endMarker, setEndMarker] = useState({ lat: null, lon: null });
+    const routeSourceRef = useRef(null);
+    const routeLayerRef = useRef(null);
 
+    const { route: routeState } = useSelector((state) => ({
+        route: state.route.routeResult,
+    }));
     const dispatch = useDispatch();
 
     useEffect(() => {
+        // 경로를 그릴 레이어 초기화
+        if (!routeSourceRef.current) {
+            routeSourceRef.current = new VectorSource();
+            routeLayerRef.current = new VectorLayer({
+                source: routeSourceRef.current,
+            });
+        }
+
         const map = new Map({
             target: mapRef.current,
             layers: [
                 new TileLayer({
-                    // source: new OSM(),
-                    source: new XYZ({
-                        url: "http://localhost:8081/geoserver/gwc/service/tms/1.0.0/shotest:zoom@EPSG:900913@png/{z}/{x}/{-y}.png",
-                    }),
+                    source: new OSM(),
+                    // source: new XYZ({
+                    //     url: "http://localhost:8081/geoserver/gwc/service/tms/1.0.0/shotest:zoom@EPSG:900913@png/{z}/{x}/{-y}.png",
+                    // }),
                 }),
                 new VectorLayer({
                     source: new Vector({
@@ -59,6 +74,7 @@ const MainMap = () => {
                         strategy: bbox,
                     }),
                 }),
+                routeLayerRef.current,
             ],
             view: new View({
                 center: fromLonLat([127.0, 37.5]),
@@ -92,11 +108,87 @@ const MainMap = () => {
 
         mapRef.current = map;
 
+        // 클린 업
         return () => {
             map.setTarget(null);
             keys.forEach((key) => unByKey(key));
         };
     }, []);
+
+    useEffect(() => {
+        if (routeState.routeList.length === 0) return;
+
+        const routeCoordinates = routeState.routeList.map((coordinate) => fromLonLat([coordinate.longitude, coordinate.latitude]));
+        const fullLines = new LineString(routeCoordinates);
+        const feature = new Feature({
+            geometry: new LineString([routeCoordinates[0]]),
+        });
+        const style = new Style({
+            stroke: new Stroke({
+                width: 3,
+                color: "#60a5fa",
+            }),
+        });
+        feature.setStyle(style);
+
+        const extent = fullLines.getExtent();
+        mapRef.current.getView().fit(extent, {
+            padding: [150, 150, 150, 150],
+            duration: 500,
+        });
+
+        let start = null;
+        const duration = 5000; // 전체 경로를 5초 동안 그리도록 설정 (숫자가 클수록 느려짐)
+
+        const animate = (time) => {
+            if (!start) start = time;
+            const elapsed = time - start;
+            const fraction = Math.min(elapsed / duration, 1); // 0에서 1까지의 진행률
+
+            // 현재 진행률(fraction)까지의 좌표를 가져옴
+            const currentCoord = fullLines.getCoordinateAt(fraction);
+
+            // 현재까지 그려진 좌표 배열을 만들어서 업데이트
+            // 1. 이미 지난 고정 점들을 필터링
+            const totalLength = fullLines.getLength();
+            const currentLength = totalLength * fraction;
+
+            const partialCoords = [];
+            let accumulatedLength = 0;
+
+            for (let i = 0; i < routeCoordinates.length - 1; i++) {
+                const segment = new LineString([routeCoordinates[i], routeCoordinates[i + 1]]);
+                const segmentLength = segment.getLength();
+
+                partialCoords.push(routeCoordinates[i]);
+
+                if (accumulatedLength + segmentLength > currentLength) {
+                    // 현재 진행 중인 구간의 보간된 끝점 추가
+                    partialCoords.push(currentCoord);
+                    break;
+                }
+                accumulatedLength += segmentLength;
+
+                // 마지막 점 처리
+                if (i === routeCoordinates.length - 2) {
+                    partialCoords.push(routeCoordinates[i + 1]);
+                }
+            }
+
+            feature.getGeometry().setCoordinates(partialCoords);
+
+            if (fraction < 1) {
+                requestAnimationFrame(animate);
+            } else {
+                start = 0;
+                requestAnimationFrame(animate);
+            }
+        };
+
+        routeSourceRef.current.clear();
+        routeSourceRef.current.addFeature(feature);
+        requestAnimationFrame(animate);
+    }, [routeState]);
 
     const handleZoomIn = () => {
         const map = mapRef.current;

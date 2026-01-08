@@ -12,11 +12,11 @@ const routeSearchSlice = createSlice({
     name: "route",
     initialState: {
         routeResult: {
-            start: { latitude: 0.0, longitude: 0.0 },
-            end: { latitude: 0.0, longitude: 0.0 },
-            routeList: [{
-                latitude: 0.0, longitude: 0.0
-            }]
+            // { latitude: 0.0, longitude: 0.0 }
+            start: null,
+            end: null,
+            // { latitude: 0.0, longitude: 0.0 }
+            routeList: []
         }
     },
     extraReducers: (builder) => {
