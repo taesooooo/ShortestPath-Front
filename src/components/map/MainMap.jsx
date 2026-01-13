@@ -119,6 +119,16 @@ const MainMap = () => {
         };
     }, []);
 
+    useEffect(() => {
+        if (routeResultState.routeList == null || routeResultState.routeList.length == 0) return;
+        const map = mapRef.current;
+        const routeCoordinates = routeResultState.routeList.map((coordinate) => fromLonLat([coordinate.longitude, coordinate.latitude]));
+        map.getView().fit(new LineString(routeCoordinates).getExtent(), {
+            padding: [100, 100, 100, 100],
+            duration: 500,
+        });
+    }, [mapRef, routeResultState]);
+
     const routeList = !isRouteTraceMode ? routeResultState.routeList : traceRouteResultState.traceRoutes;
     const mode = !isRouteTraceMode ? "route" : "trace";
     useRouteAnimation(routeList, routeSourceRef.current, mode);
