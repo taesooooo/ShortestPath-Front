@@ -123,6 +123,10 @@ const MainMap = () => {
     const mode = !isRouteTraceMode ? "route" : "trace";
     useRouteAnimation(routeList, routeSourceRef.current, mode);
 
+    const handleContextItemClick = () => {
+        setMenuConfig((prev) => ({ ...prev, isVisible: false }));
+    };
+
     const handleZoomIn = () => {
         const map = mapRef.current;
         const view = map?.getView();
@@ -235,15 +239,23 @@ const MainMap = () => {
         setRouteTraceMode(false);
     };
 
-    const handleTraceRoute = () => {
-        dispatch(traceRoute({ start: startMarker, end: endMarker }));
-        setRouteTraceMode(true);
+    const handleToggleRouteView = () => {
+        if (isRouteTraceMode) {
+            setRouteTraceMode((prev) => !prev);
+        } else {
+            dispatch(traceRoute({ start: startMarker, end: endMarker }));
+            setRouteTraceMode(true);
+        }
     };
 
     return (
         <div ref={mapRef} id="map-container">
             <ControlContainer zoomLevel={zoomLevel} onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} onStartMarker={handleStartMarker} onEndMarker={handleEndMarker} />
-            <ContextMenu menuConfig={menuConfig} item={[{ icon: LuMap, name: "현재 경로 추적", onClick: handleTraceRoute }, { name: "테스트" }, { name: "테스트" }]} />
+            <ContextMenu
+                menuConfig={menuConfig}
+                onClick={handleContextItemClick}
+                item={[{ icon: LuMap, name: !isRouteTraceMode ? "현재 경로 추적" : "현재 경로 확인", action: handleToggleRouteView }, { name: "테스트" }, { name: "테스트" }]}
+            />
         </div>
     );
 };
