@@ -99,13 +99,13 @@ const MainMap = () => {
             map.on("contextmenu", (e) => {
                 e.preventDefault();
                 setMenuConfig({ isVisible: true, x: e.pixel[0], y: e.pixel[1] });
-            })
+            }),
         );
 
         keys.push(
             map.on("click", () => {
                 setMenuConfig((prev) => ({ ...prev, isVisible: false }));
-            })
+            }),
         );
 
         updateZoomLevel();
@@ -212,7 +212,7 @@ const MainMap = () => {
             map.on("pointermove", (e) => {
                 const coordinate = e.coordinate;
                 marker.getGeometry().setCoordinates(coordinate);
-            })
+            }),
         );
 
         keys.push(
@@ -220,7 +220,7 @@ const MainMap = () => {
                 keys.forEach((key) => unByKey(key));
                 const finalCoordinate = toLonLat(e.coordinate);
                 makerFinalizeClick(finalCoordinate);
-            })
+            }),
         );
     };
 
@@ -258,13 +258,22 @@ const MainMap = () => {
         }
     };
 
+    const handleSearchRestaurants = () => {
+        const map = mapRef.current;
+        const view = map.getView();
+        const extent = view.calculateExtent(map.getSize());
+        const bbox = transformExtent(extent, "EPSG:3857", "EPSG:5174");
+
+        console.log(bbox);
+        // dispatch();
+    };
     return (
         <div ref={mapRef} id="map-container">
             <ControlContainer zoomLevel={zoomLevel} onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} onStartMarker={handleStartMarker} onEndMarker={handleEndMarker} />
             <ContextMenu
                 menuConfig={menuConfig}
                 onClick={handleContextItemClick}
-                item={[{ icon: LuMap, name: !isRouteTraceMode ? "현재 경로 추적" : "현재 경로 확인", action: handleToggleRouteView }, { name: "테스트" }, { name: "테스트" }]}
+                item={[{ icon: LuMap, name: !isRouteTraceMode ? "현재 경로 추적" : "현재 경로 확인", action: handleToggleRouteView }, { icon: LuMap, name: "현재 화면에서 음식점 조회", action: handleSearchRestaurants }, { name: "테스트" }]}
             />
         </div>
     );
