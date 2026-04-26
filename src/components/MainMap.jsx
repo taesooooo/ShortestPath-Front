@@ -1,3 +1,5 @@
+import proj4 from "proj4";
+import { register } from "ol/proj/proj4";
 import { Feature, Map, View } from "ol";
 import Layer from "ol/layer/Layer";
 import { OSM, Source, Vector, XYZ } from "ol/source";
@@ -5,9 +7,9 @@ import { OSM, Source, Vector, XYZ } from "ol/source";
 import "ol/ol.css";
 import { useEffect, useRef, useState } from "react";
 import TileLayer from "ol/layer/Tile";
-import ControlContainer from "./controls/ControlContainer";
-import ContextMenu from "./contextmenu/ContextMenu";
-import { fromLonLat, toLonLat, transformExtent } from "ol/proj";
+import ControlContainer from "./map/controls/ControlContainer";
+import ContextMenu from "./map/contextmenu/ContextMenu";
+import { fromLonLat, toLonLat, transform, transformExtent } from "ol/proj";
 import { GeoJSON } from "ol/format";
 import { bbox } from "ol/loadingstrategy";
 import VectorLayer from "ol/layer/Vector";
@@ -19,13 +21,19 @@ import { Style, Circle } from "ol/style";
 import { makeRegular } from "ol/geom/Polygon";
 import { LineString, MultiPoint, Point } from "ol/geom";
 import { useDispatch, useSelector } from "react-redux";
-import { findRoute, traceRoute } from "../../store/routeSearchSlice";
+import { findRoute, traceRoute } from "../store/routeSearchSlice";
 import Stroke from "ol/style/Stroke";
 import Fill from "ol/style/Fill";
-import { useRouteAnimation } from "../../hooks/useRouteAnimation";
-import useTraceRouteAnimation from "../../hooks/useTraceRouteAnimation";
+import { useRouteAnimation } from "../hooks/useRouteAnimation";
+import useTraceRouteAnimation from "../hooks/useTraceRouteAnimation";
+import { searchRestaurants } from "../store/restaurantSearchSlice";
 
 const MainMap = () => {
+    proj4.defs("EPSG:5174", "+proj=tmerc +lat_0=38 +lon_0=127.0028902777778 +k=1 +x_0=200000 +y_0=500000 +ellps=bessel +units=m +no_defs +towgs84=-115.80,474.99,674.11,1.16,-2.31,-1.63,6.43");
+
+    // 2. 오픈레이어스에 proj4 등록
+    register(proj4);
+
     const mapRef = useRef(null);
     const [zoomLevel, setZoomLevel] = useState(1);
     const [menuConfig, setMenuConfig] = useState({ isVisible: false, x: 0, y: 0 });
@@ -36,10 +44,15 @@ const MainMap = () => {
     const [isRouteTraceMode, setRouteTraceMode] = useState(false);
     const routeSourceRef = useRef(null);
     const routeLayerRef = useRef(null);
+    const storesSourceRef = useRef(null);
 
-    const { routeResultState, traceRouteResultState } = useSelector((state) => ({
+    const { routeResultState, traceRouteResultState, foodStoresState, selectedRestaurant, keyword, category } = useSelector((state) => ({
         routeResultState: state.route.routeResult,
         traceRouteResultState: state.route.traceRouteResult,
+        foodStoresState: state.restaurant.restaurants,
+        selectedRestaurant: state.restaurant.selectedRestaurant,
+        keyword: state.restaurant.keyword,
+        category: state.restaurant.category,
     }));
     const dispatch = useDispatch();
 
@@ -262,11 +275,83 @@ const MainMap = () => {
         const map = mapRef.current;
         const view = map.getView();
         const extent = view.calculateExtent(map.getSize());
-        const bbox = transformExtent(extent, "EPSG:3857", "EPSG:5174");
+        const bbox = transformExtent(extent, "EPSG:3857", "EPSG:4326");
 
-        console.log(bbox);
-        // dispatch();
+        dispatch(
+            searchRestaurants({
+                page: 1,
+                size: 10,
+                keyword,
+                category,
+                boundingBox: bbox,
+            }),
+        );
     };
+
+    // 음식점 검색 후 마커 표시
+    useEffect(() => {
+        if (foodStoresState.length === 0) return;
+
+        const coordinates = foodStoresState
+            .map((store) => {
+                if (store.x && store.y) {
+                    return transform([store.x, store.y], "EPSG:5174", "EPSG:3857");
+                }
+                return null;
+            })
+            .filter((coord) => coord !== null);
+
+        const features = coordinates.map(
+            (coordinate) =>
+                new Feature({
+                    geometry: new Point(coordinate),
+                }),
+        );
+        const markerStyle = new Style({
+            image: new Icon({
+                src: `/map-pin-blue.svg`,
+                scale: 1,
+                anchor: [0.5, 1],
+            }),
+        });
+
+        if (storesSourceRef.current) {
+            storesSourceRef.current.clear();
+            storesSourceRef.current.addFeatures(features);
+        } else {
+            storesSourceRef.current = new VectorSource({
+                features: features,
+            });
+
+            mapRef.current.addLayer(
+                new VectorLayer({
+                    style: markerStyle,
+                    source: storesSourceRef.current,
+                }),
+            );
+        }
+
+        const extent = storesSourceRef.current.getExtent();
+        mapRef.current.getView().fit(extent, {
+            padding: [100, 100, 100, 100],
+            duration: 500,
+        });
+    }, [foodStoresState]);
+
+    // 음식점 선택 시 맵 이동
+    useEffect(() => {
+        if (!selectedRestaurant || !selectedRestaurant.x || !selectedRestaurant.y) return;
+
+        const map = mapRef.current;
+        const coordinates = transform([selectedRestaurant.x, selectedRestaurant.y], "EPSG:5174", "EPSG:3857");
+
+        map.getView().animate({
+            center: coordinates,
+            zoom: 16,
+            duration: 500,
+        });
+    }, [selectedRestaurant]);
+
     return (
         <div ref={mapRef} id="map-container">
             <ControlContainer zoomLevel={zoomLevel} onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} onStartMarker={handleStartMarker} onEndMarker={handleEndMarker} />

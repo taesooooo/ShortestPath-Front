@@ -1,50 +1,34 @@
-export const searchRestaurantsByAddress = async (address) => {
-    return new Promise((resolve) => {
-        setTimeout(() => {
-            // 더미 데이터
-            const restaurants = [
-                {
-                    id: 1,
-                    name: "맛있는 한식당",
-                    address: address,
-                    category: "한식",
-                    rating: 4.5,
-                    reviews: 128,
-                },
-                {
-                    id: 2,
-                    name: "중국음식점",
-                    address: address,
-                    category: "중식",
-                    rating: 4.2,
-                    reviews: 95,
-                },
-                {
-                    id: 3,
-                    name: "피자하우스",
-                    address: address,
-                    category: "양식",
-                    rating: 4.1,
-                    reviews: 67,
-                },
-                {
-                    id: 4,
-                    name: "일식당",
-                    address: address,
-                    category: "일식",
-                    rating: 4.8,
-                    reviews: 156,
-                },
-                {
-                    id: 5,
-                    name: "카페 & 베이커리",
-                    address: address,
-                    category: "카페",
-                    rating: 4.3,
-                    reviews: 203,
-                },
-            ];
-            resolve({ data: restaurants });
-        }, 500);
+import QueryString from "qs";
+import defaultAxios from "./defaultAxios";
+
+export const searchRestaurants = (pageInfo, keyword, category, boundingBox) => {
+    const param = {
+        page: pageInfo.page,
+        size: pageInfo.size,
+        keyword,
+        category,
+        minLat: boundingBox ? boundingBox[1] : null,
+        minLon: boundingBox ? boundingBox[0] : null,
+        maxLat: boundingBox ? boundingBox[3] : null,
+        maxLon: boundingBox ? boundingBox[2] : null,
+    }
+
+    const requestParams = QueryString.stringify(param, {
+        filter: (prefix, value) => {
+            if (value === null || value === undefined || value === '') {
+                return;
+            }
+
+            return value;
+        }
     });
+
+    const params = `page=${pageInfo.page}&size=${pageInfo.size}&keyword=${keyword}&category=${category}`;
+    return defaultAxios.get(`/api/foodstores/search?${requestParams}`);
 };
+
+export const searchRestaurantsByCategory = (pageInfo, category) => {
+    const params = `page=${pageInfo.page}&size=${pageInfo.size}`;
+    return defaultAxios.get(`/api/foodstores/category/${category}?${params}`);
+}
+

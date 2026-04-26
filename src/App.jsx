@@ -1,5 +1,5 @@
 import { useState } from "react";
-import MainMap from "./components/map/MainMap";
+import MainMap from "./components/MainMap";
 import Sidebar from "./components/Sidebar";
 import { LuArrowRightFromLine } from "react-icons/lu";
 
