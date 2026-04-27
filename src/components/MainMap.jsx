@@ -1,6 +1,6 @@
 import proj4 from "proj4";
 import { register } from "ol/proj/proj4";
-import { Feature, Map, View } from "ol";
+import { Feature, Map, Overlay, View } from "ol";
 import Layer from "ol/layer/Layer";
 import { OSM, Source, Vector, XYZ } from "ol/source";
 
@@ -27,6 +27,7 @@ import Fill from "ol/style/Fill";
 import { useRouteAnimation } from "../hooks/useRouteAnimation";
 import useTraceRouteAnimation from "../hooks/useTraceRouteAnimation";
 import { searchRestaurants } from "../store/restaurantSearchSlice";
+import FoodOverlay from "./map/FoodOverlay";
 
 const MainMap = () => {
     proj4.defs("EPSG:5174", "+proj=tmerc +lat_0=38 +lon_0=127.0028902777778 +k=1 +x_0=200000 +y_0=500000 +ellps=bessel +units=m +no_defs +towgs84=-115.80,474.99,674.11,1.16,-2.31,-1.63,6.43");
@@ -45,6 +46,10 @@ const MainMap = () => {
     const routeSourceRef = useRef(null);
     const routeLayerRef = useRef(null);
     const storesSourceRef = useRef(null);
+
+    const [overlayVisibleInfo, setOverlayVisibleInfo] = useState(null);
+    const overlayElementRef = useRef(null);
+    const overlayRef = useRef(null);
 
     const { routeResultState, traceRouteResultState, foodStoresState, selectedRestaurant, keyword, category } = useSelector((state) => ({
         routeResultState: state.route.routeResult,
@@ -123,6 +128,38 @@ const MainMap = () => {
 
         updateZoomLevel();
 
+        const overlay = new Overlay({
+            element: overlayElementRef.current,
+            positioning: "bottom-center",
+            stopEvent: true,
+            offset: [0, -30],
+            // position: [],
+            autoPan: true,
+        });
+
+        map.addOverlay(overlay);
+        overlayRef.current = overlay;
+
+        // 지도 클릭시 마커를 확인하고 오버레이 표시
+        map.on("singleclick", (e) => {
+            const feature = map.forEachFeatureAtPixel(
+                e.pixel,
+                (feature) => {
+                    return feature;
+                },
+                { hitTolerance: 3 },
+            );
+
+            if (feature) {
+                const coordinates = feature.getGeometry().getCoordinates();
+                overlay.setPosition(coordinates);
+                setOverlayVisibleInfo(feature.get("storeInfo"));
+            } else {
+                overlay.setPosition(undefined);
+                setOverlayVisibleInfo(null);
+            }
+        });
+
         mapRef.current = map;
 
         // 클린 업
@@ -177,6 +214,7 @@ const MainMap = () => {
         const id = type === "blue" ? 1 : 2;
 
         const markerFeature = layerSource?.getFeatureById(id);
+        //  기존 마커 제거
         if (markerFeature != null) {
             layerSource.removeFeature(markerFeature);
         }
@@ -215,7 +253,7 @@ const MainMap = () => {
         return marker;
     };
 
-    const markerCreate = (makerFinalizeClick, type) => {
+    const markerCreate = (markingComplete, type) => {
         const map = mapRef.current;
         // const initCoordinate = toLonLat(map.getCoordinateFromPixel([e.pageX, e.pageY]));
         const marker = newMarker(type);
@@ -232,33 +270,54 @@ const MainMap = () => {
             map.on("click", (e) => {
                 keys.forEach((key) => unByKey(key));
                 const finalCoordinate = toLonLat(e.coordinate);
-                makerFinalizeClick(finalCoordinate);
+                markingComplete(finalCoordinate);
             }),
         );
     };
 
-    const handleStartMarker = (e) => {
+    const handleStartMarker = (isOverlayClick = false) => {
         if (isMarkerCreating) return;
 
-        markerCreate((finalCoordinate) => {
+        const markingComplete = (finalCoordinate) => {
             setStartMarker({ lat: finalCoordinate[1], lon: finalCoordinate[0] });
             setMarkerCreating(false);
-        }, "blue");
+        };
 
-        setMarkerCreating(true);
+        if (!isOverlayClick) {
+            markerCreate(markingComplete, "blue");
+
+            setMarkerCreating(true);
+        } else {
+            // 오버레이에서 출발 클릭시 좌표에 출발 마커 표시 및 출발지 설정
+            const coordinate = transform([overlayVisibleInfo.x, overlayVisibleInfo.y], "EPSG:5174", "EPSG:4326");
+            const marker = newMarker("blue");
+            marker.getGeometry().setCoordinates(transform([overlayVisibleInfo.x, overlayVisibleInfo.y], "EPSG:5174", "EPSG:3857"));
+            markingComplete(coordinate);
+        }
     };
 
-    const handleEndMarker = (e) => {
+    const handleEndMarker = (isOverlayClick = false) => {
         if (isMarkerCreating) return;
 
-        markerCreate((finalCoordinate) => {
+        const markingComplete = (finalCoordinate) => {
             const endCoordinate = { lat: finalCoordinate[1], lon: finalCoordinate[0] };
             setEndMarker(endCoordinate);
             setMarkerCreating(false);
             dispatch(findRoute({ start: startMarker, end: endCoordinate }));
-        }, "red");
+        };
 
-        setMarkerCreating(true);
+        if (!isOverlayClick) {
+            markerCreate(markingComplete, "red");
+
+            setMarkerCreating(true);
+        } else {
+            // 오버레이에서 도착 클릭시 좌표에 도착 마커 표시 및 도착지 설정
+            const coordinate = transform([overlayVisibleInfo.x, overlayVisibleInfo.y], "EPSG:5174", "EPSG:4326");
+            const marker = newMarker("red");
+            marker.getGeometry().setCoordinates(transform([overlayVisibleInfo.x, overlayVisibleInfo.y], "EPSG:5174", "EPSG:3857"));
+            markingComplete(coordinate);
+        }
+
         setRouteTraceMode(false);
     };
 
@@ -292,24 +351,20 @@ const MainMap = () => {
     useEffect(() => {
         if (foodStoresState.length === 0) return;
 
-        const coordinates = foodStoresState
-            .map((store) => {
-                if (store.x && store.y) {
-                    return transform([store.x, store.y], "EPSG:5174", "EPSG:3857");
-                }
-                return null;
-            })
-            .filter((coord) => coord !== null);
+        const features = foodStoresState.map((store) => {
+            if (store.x && store.y) {
+                const coordi = transform([store.x, store.y], "EPSG:5174", "EPSG:3857");
+                return new Feature({
+                    geometry: new Point(coordi),
+                    storeInfo: store,
+                });
+            }
 
-        const features = coordinates.map(
-            (coordinate) =>
-                new Feature({
-                    geometry: new Point(coordinate),
-                }),
-        );
+            return null;
+        });
         const markerStyle = new Style({
             image: new Icon({
-                src: `/map-pin-blue.svg`,
+                src: `/map-pin-green.svg`,
                 scale: 1,
                 anchor: [0.5, 1],
             }),
@@ -350,16 +405,26 @@ const MainMap = () => {
             zoom: 16,
             duration: 500,
         });
+
+        setOverlayVisibleInfo(selectedRestaurant);
+        overlayRef.current.setPosition(coordinates);
     }, [selectedRestaurant]);
 
     return (
-        <div ref={mapRef} id="map-container">
+        <div className="relative w-full h-screen">
+            <div ref={mapRef} className="w-full h-full" />
             <ControlContainer zoomLevel={zoomLevel} onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} onStartMarker={handleStartMarker} onEndMarker={handleEndMarker} />
             <ContextMenu
                 menuConfig={menuConfig}
                 onClick={handleContextItemClick}
-                item={[{ icon: LuMap, name: !isRouteTraceMode ? "현재 경로 추적" : "현재 경로 확인", action: handleToggleRouteView }, { icon: LuMap, name: "현재 화면에서 음식점 조회", action: handleSearchRestaurants }, { name: "테스트" }]}
+                item={[
+                    { icon: LuMap, name: !isRouteTraceMode ? "현재 경로 추적" : "현재 경로 확인", action: handleToggleRouteView },
+                    { icon: LuMap, name: "현재 화면에서 음식점 조회", action: handleSearchRestaurants },
+                ]}
             />
+            <div>
+                <FoodOverlay ref={overlayElementRef} visibleInfo={overlayVisibleInfo} onStartMarker={handleStartMarker} onEndMarker={handleEndMarker} />
+            </div>
         </div>
     );
 };
