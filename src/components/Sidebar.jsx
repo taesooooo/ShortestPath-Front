@@ -1,13 +1,10 @@
 import { useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { searchRestaurantsByCategory, setSearchAddress, selectRestaurant, searchRestaurants, updateCategory, updateKeyword } from "../store/restaurantSearchSlice";
+import { searchRestaurantsByCategory, selectRestaurant, searchRestaurants, updateCategory, updateKeyword } from "../store/restaurantSearchSlice";
 import SidebarHeader from "./sidebar/SidebarHeader";
 import SidebarSearchArea from "./sidebar/SidebarSearchArea";
 import RestaurantList from "./sidebar/RestaurantList";
-import Pagenation from "./Pagination";
-import usePagination from "../hooks/usePagination";
 import Pagination from "./Pagination";
-import { GrUpdate } from "react-icons/gr";
 
 const Sidebar = ({ sidebarOpen, onClose }) => {
     const dispatch = useDispatch();
@@ -91,8 +88,8 @@ const Sidebar = ({ sidebarOpen, onClose }) => {
     };
 
     return (
-        <div className={`absolute transition-all duration-300 ease-in-out overflow-hidden ${sidebarOpen ? "w-80 h-full" : "w-0"}`}>
-            <div className="z-10 relative w-80 bg-white border-r border-gray-200 flex flex-col h-full">
+        <div className={`absolute left-0 z-20 transition-all duration-300 ease-in-out overflow-hidden ${sidebarOpen ? "w-80 h-full" : "w-0"}`}>
+            <div className="relative w-80 bg-white border-r border-gray-200 flex flex-col h-full">
                 <SidebarHeader onClose={onClose} />
 
                 <SidebarSearchArea keyword={keyword} onkeywordChange={handleKeywordChange} onSearch={handleSearch} onKeyPress={handleKeyPress} onCategoryChange={handleCategoryChange} loading={loading} />

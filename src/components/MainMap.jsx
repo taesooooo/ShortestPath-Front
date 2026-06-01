@@ -1,8 +1,7 @@
 import proj4 from "proj4";
 import { register } from "ol/proj/proj4";
-import { Feature, Map, Overlay, View } from "ol";
-import Layer from "ol/layer/Layer";
-import { OSM, Source, Vector, XYZ } from "ol/source";
+import { Feature, Map as OlMap, Overlay, View } from "ol";
+import { OSM, Vector } from "ol/source";
 
 import "ol/ol.css";
 import { useEffect, useRef, useState } from "react";
@@ -14,20 +13,351 @@ import { GeoJSON } from "ol/format";
 import { bbox } from "ol/loadingstrategy";
 import VectorLayer from "ol/layer/Vector";
 import Icon from "ol/style/Icon";
-import { LuAArrowDown, LuMap, LuMapPin } from "react-icons/lu";
+import { LuMap } from "react-icons/lu";
 import { unByKey } from "ol/Observable";
 import VectorSource from "ol/source/Vector";
-import { Style, Circle } from "ol/style";
-import { makeRegular } from "ol/geom/Polygon";
-import { LineString, MultiPoint, Point } from "ol/geom";
+import { Circle as CircleStyle, Fill, Style, Text } from "ol/style";
+import { LineString, MultiLineString, Point } from "ol/geom";
 import { useDispatch, useSelector } from "react-redux";
-import { findRoute, traceRoute } from "../store/routeSearchSlice";
+import { findRoute, selectRoute, traceRoute } from "../store/routeSearchSlice";
 import Stroke from "ol/style/Stroke";
-import Fill from "ol/style/Fill";
-import { useRouteAnimation } from "../hooks/useRouteAnimation";
-import useTraceRouteAnimation from "../hooks/useTraceRouteAnimation";
 import { searchRestaurants } from "../store/restaurantSearchSlice";
 import FoodOverlay from "./map/FoodOverlay";
+
+const isValidCoordinate = (coordinate) => Number.isFinite(coordinate?.longitude) && Number.isFinite(coordinate?.latitude);
+
+const toMapCoordinate = (coordinate) => fromLonLat([coordinate.longitude, coordinate.latitude]);
+
+const toMapLineCoordinates = (coordinates = []) => coordinates.filter(isValidCoordinate).map(toMapCoordinate);
+
+const asArray = (value) => {
+    if (Array.isArray(value)) return value;
+    return value ? [value] : [];
+};
+
+const getRouteResults = (routeResultState) => asArray(routeResultState).filter(Boolean);
+
+const getCoordinateArray = (coordinates) => (Array.isArray(coordinates) ? coordinates : []);
+
+const getRouteCoordinates = (routeResult) => {
+    const routeList = getCoordinateArray(routeResult?.routeList);
+    if (routeList.length > 0) return routeList;
+
+    const routeCoordinates = getCoordinateArray(routeResult?.routeCoordinates);
+    if (routeCoordinates.length > 0) return routeCoordinates;
+
+    return getCoordinateArray(routeResult?.routeSteps)
+        .map((routeStep) => routeStep?.coordinate)
+        .filter(isValidCoordinate);
+};
+
+const createRouteInfo = (routeResult, routeIndex, source, selectedStep = null) => ({
+    source,
+    routeIndex,
+    start: routeResult?.start ?? null,
+    end: routeResult?.end ?? null,
+    routeCoordinates: getRouteCoordinates(routeResult),
+    routeSteps: routeResult?.routeSteps ?? [],
+    traceRoutesCount: routeResult?.traceRoutes?.length ?? 0,
+    searchTime: routeResult?.searchTime ?? null,
+    selectedStep,
+});
+
+const getRouteLines = (routeResultState) =>
+    getRouteResults(routeResultState)
+        .map((routeResult) => toMapLineCoordinates(getRouteCoordinates(routeResult)))
+        .filter((coordinates) => coordinates.length > 0);
+
+const getRouteRenderItems = (routeResultState) =>
+    getRouteResults(routeResultState)
+        .map((routeResult, routeIndex) => ({
+            routeResult,
+            routeIndex,
+            routeInfo: createRouteInfo(routeResult, routeIndex, "route"),
+            lineCoordinates: toMapLineCoordinates(getRouteCoordinates(routeResult)),
+        }))
+        .filter((routeItem) => routeItem.lineCoordinates.length > 0);
+
+const getDistanceInMeters = (from, to) => {
+    const earthRadius = 6371000;
+    const toRadians = (value) => (value * Math.PI) / 180;
+    const latitudeDistance = toRadians(to.latitude - from.latitude);
+    const longitudeDistance = toRadians(to.longitude - from.longitude);
+    const fromLatitude = toRadians(from.latitude);
+    const toLatitude = toRadians(to.latitude);
+
+    const a = Math.sin(latitudeDistance / 2) ** 2 + Math.cos(fromLatitude) * Math.cos(toLatitude) * Math.sin(longitudeDistance / 2) ** 2;
+
+    return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+const getRouteStepDistance = (routeSteps, startIndex, endIndex) => {
+    let distance = 0;
+
+    for (let index = startIndex + 1; index <= endIndex; index++) {
+        const previousCoordinate = routeSteps[index - 1]?.coordinate;
+        const currentCoordinate = routeSteps[index]?.coordinate;
+
+        if (isValidCoordinate(previousCoordinate) && isValidCoordinate(currentCoordinate)) {
+            distance += getDistanceInMeters(previousCoordinate, currentCoordinate);
+        }
+    }
+
+    return distance;
+};
+
+const getGuideSteps = (routeSteps = []) => {
+    const guideSteps = [];
+
+    for (let index = 0; index < routeSteps.length; index++) {
+        const routeStep = routeSteps[index];
+
+        if (!routeStep?.turnDirection || !isValidCoordinate(routeStep.coordinate)) continue;
+
+        if (routeStep.turnDirection !== "STRAIGHT") {
+            guideSteps.push({
+                ...routeStep,
+                stepIndex: index,
+                endStepIndex: index,
+                straightCount: 0,
+            });
+            continue;
+        }
+
+        const straightStartIndex = index;
+        let straightEndIndex = index;
+
+        while (
+            straightEndIndex + 1 < routeSteps.length &&
+            routeSteps[straightEndIndex + 1]?.turnDirection === "STRAIGHT" &&
+            isValidCoordinate(routeSteps[straightEndIndex + 1]?.coordinate)
+        ) {
+            straightEndIndex++;
+        }
+
+        guideSteps.push({
+            ...routeStep,
+            coordinate: routeSteps[straightEndIndex].coordinate,
+            startCoordinate: routeStep.coordinate,
+            endCoordinate: routeSteps[straightEndIndex].coordinate,
+            stepIndex: straightStartIndex,
+            endStepIndex: straightEndIndex,
+            straightCount: straightEndIndex - straightStartIndex + 1,
+            distance: getRouteStepDistance(routeSteps, straightStartIndex, straightEndIndex),
+        });
+
+        index = straightEndIndex;
+    }
+
+    return guideSteps;
+};
+
+const getRouteStepFeatures = (routeResultState) =>
+    getRouteResults(routeResultState).flatMap((routeResult, routeIndex) =>
+        getGuideSteps(routeResult?.routeSteps)
+            .filter((routeStep) => isValidCoordinate(routeStep?.coordinate))
+            .map((routeStep) => ({
+                coordinate: toMapCoordinate(routeStep.coordinate),
+                turnDirection: routeStep.turnDirection,
+                routeInfo: createRouteInfo(routeResult, routeIndex, "route", {
+                    coordinate: routeStep.coordinate,
+                    startCoordinate: routeStep.startCoordinate,
+                    endCoordinate: routeStep.endCoordinate,
+                    turnDirection: routeStep.turnDirection,
+                    stepIndex: routeStep.stepIndex,
+                    endStepIndex: routeStep.endStepIndex,
+                    straightCount: routeStep.straightCount,
+                    distance: routeStep.distance,
+                }),
+                routeIndex,
+                stepIndex: routeStep.stepIndex,
+                straightCount: routeStep.straightCount,
+            })),
+    );
+
+const getCoordinateKey = (coordinate) => `${coordinate.latitude.toFixed(7)},${coordinate.longitude.toFixed(7)}`;
+
+const getLineKey = (coordinateA, coordinateB) => [getCoordinateKey(coordinateA), getCoordinateKey(coordinateB)].sort().join("|");
+
+const addCoordinateSide = (coordinateSides, coordinate, searchSide) => {
+    const coordinateKey = getCoordinateKey(coordinate);
+
+    if (!coordinateSides.has(coordinateKey)) {
+        coordinateSides.set(coordinateKey, new Set());
+    }
+
+    coordinateSides.get(coordinateKey).add(searchSide);
+};
+
+const getTraceLinesBySearchSide = (traceRoutes = []) => {
+    const coordinateSides = new Map();
+    const traceSegments = new Map();
+
+    traceRoutes.forEach((traceRoute) => {
+        const parentCoordinate = traceRoute?.parentCoordinate;
+        const visitedCoordinates = traceRoute?.visitedCoordinates ?? [];
+        const searchSide = traceRoute?.searchSide === "REVERSE" ? "REVERSE" : "FORWARD";
+
+        if (!isValidCoordinate(parentCoordinate)) return;
+
+        addCoordinateSide(coordinateSides, parentCoordinate, searchSide);
+
+        visitedCoordinates.filter(isValidCoordinate).forEach((visitedCoordinate) => {
+            const lineKey = getLineKey(parentCoordinate, visitedCoordinate);
+
+            addCoordinateSide(coordinateSides, visitedCoordinate, searchSide);
+
+            if (!traceSegments.has(lineKey)) {
+                traceSegments.set(lineKey, {
+                    parentCoordinate,
+                    visitedCoordinate,
+                    sides: new Set(),
+                });
+            }
+
+            traceSegments.get(lineKey).sides.add(searchSide);
+        });
+    });
+
+    return Array.from(traceSegments.values()).reduce(
+        (traceLinesBySearchSide, traceSegment) => {
+            const { parentCoordinate, visitedCoordinate, sides } = traceSegment;
+            const hasOverlappedSegment = sides.has("FORWARD") && sides.has("REVERSE");
+            const hasOverlappedCoordinate =
+                coordinateSides.get(getCoordinateKey(parentCoordinate))?.size > 1 ||
+                coordinateSides.get(getCoordinateKey(visitedCoordinate))?.size > 1;
+            const lineCoordinates = [toMapCoordinate(parentCoordinate), toMapCoordinate(visitedCoordinate)];
+            const searchSide = sides.has("REVERSE") ? "REVERSE" : "FORWARD";
+
+            if (hasOverlappedSegment || hasOverlappedCoordinate) {
+                traceLinesBySearchSide.OVERLAP.push(lineCoordinates);
+                return traceLinesBySearchSide;
+            }
+
+            traceLinesBySearchSide[searchSide].push(lineCoordinates);
+            return traceLinesBySearchSide;
+        },
+        {
+            FORWARD: [],
+            REVERSE: [],
+            OVERLAP: [],
+        },
+    );
+};
+
+const createLineFeature = (geometry, color, width = 3, properties = {}) => {
+    const feature = new Feature({ geometry });
+    Object.entries(properties).forEach(([key, value]) => feature.set(key, value));
+    feature.setStyle(
+        new Style({
+            stroke: new Stroke({
+                width,
+                color,
+            }),
+        }),
+    );
+
+    return feature;
+};
+
+const getRouteStepStyleConfig = (turnDirection) => {
+    switch (turnDirection) {
+        case "START":
+            return { color: "#16a34a", label: "S", radius: 8 };
+        case "END":
+            return { color: "#dc2626", label: "E", radius: 8 };
+        case "LEFT":
+            return { color: "#f59e0b", label: "L", radius: 7 };
+        case "RIGHT":
+            return { color: "#f59e0b", label: "R", radius: 7 };
+        case "STRAIGHT":
+            return { color: "#0ea5e9", label: "↑", radius: 6 };
+        case "U_TURN":
+            return { color: "#9333ea", label: "U", radius: 7 };
+        default:
+            return { color: "#64748b", label: "", radius: 4 };
+    }
+};
+
+const directionLabels = {
+    START: "출발",
+    STRAIGHT: "직진",
+    LEFT: "좌회전",
+    RIGHT: "우회전",
+    U_TURN: "유턴",
+    END: "도착",
+};
+
+const formatDistance = (meters) => {
+    if (!Number.isFinite(meters)) return "";
+    if (meters >= 1000) return `${(meters / 1000).toFixed(2)} km`;
+    return `${Math.round(meters)} m`;
+};
+
+const getHoveredRouteStepText = (routeStep) => {
+    const label = directionLabels[routeStep?.turnDirection] ?? routeStep?.turnDirection ?? "";
+
+    if (routeStep?.turnDirection !== "STRAIGHT") return label;
+
+    const distanceText = formatDistance(routeStep.distance);
+    return distanceText ? `${label} ${distanceText}` : label;
+};
+
+const createRouteStepFeature = ({ coordinate, turnDirection, routeInfo, routeIndex, stepIndex }) => {
+    const { color, label, radius } = getRouteStepStyleConfig(turnDirection);
+    const feature = new Feature({ geometry: new Point(coordinate) });
+
+    feature.set("routeStep", { turnDirection, routeIndex, stepIndex });
+    if (routeInfo) {
+        feature.set("routeInfo", routeInfo);
+    }
+    feature.setStyle(
+        new Style({
+            image: new CircleStyle({
+                radius,
+                fill: new Fill({ color }),
+                stroke: new Stroke({
+                    color: "#ffffff",
+                    width: 2,
+                }),
+            }),
+            text: label
+                ? new Text({
+                      text: label,
+                      fill: new Fill({ color: "#ffffff" }),
+                      font: "bold 11px sans-serif",
+                  })
+                : undefined,
+        }),
+    );
+
+    return feature;
+};
+
+const createHoveredRouteStepFeature = (routeStep) => {
+    const coordinate = routeStep?.coordinate;
+
+    if (!isValidCoordinate(coordinate)) return null;
+
+    const feature = new Feature({
+        geometry: new Point(toMapCoordinate(coordinate)),
+    });
+
+    feature.setStyle(
+        new Style({
+            text: new Text({
+                text: getHoveredRouteStepText(routeStep),
+                offsetY: -18,
+                font: "bold 12px sans-serif",
+                fill: new Fill({ color: "#ffffff" }),
+                backgroundFill: new Fill({ color: "rgba(17, 24, 39, 0.9)" }),
+                padding: [4, 6, 4, 6],
+            }),
+        }),
+    );
+
+    return feature;
+};
 
 const MainMap = () => {
     proj4.defs("EPSG:5174", "+proj=tmerc +lat_0=38 +lon_0=127.0028902777778 +k=1 +x_0=200000 +y_0=500000 +ellps=bessel +units=m +no_defs +towgs84=-115.80,474.99,674.11,1.16,-2.31,-1.63,6.43");
@@ -45,15 +375,19 @@ const MainMap = () => {
     const [isRouteTraceMode, setRouteTraceMode] = useState(false);
     const routeSourceRef = useRef(null);
     const routeLayerRef = useRef(null);
+    const hoveredRouteStepSourceRef = useRef(null);
+    const hoveredRouteStepLayerRef = useRef(null);
     const storesSourceRef = useRef(null);
 
     const [overlayVisibleInfo, setOverlayVisibleInfo] = useState(null);
     const overlayElementRef = useRef(null);
     const overlayRef = useRef(null);
 
-    const { routeResultState, traceRouteResultState, foodStoresState, selectedRestaurant, keyword, category } = useSelector((state) => ({
+    const { routeResultState, traceRouteResultState, hoveredRouteStep, focusedRouteStep, foodStoresState, selectedRestaurant, keyword, category } = useSelector((state) => ({
         routeResultState: state.route.routeResult,
         traceRouteResultState: state.route.traceRouteResult,
+        hoveredRouteStep: state.route.hoveredRouteStep,
+        focusedRouteStep: state.route.focusedRouteStep,
         foodStoresState: state.restaurant.restaurants,
         selectedRestaurant: state.restaurant.selectedRestaurant,
         keyword: state.restaurant.keyword,
@@ -70,7 +404,15 @@ const MainMap = () => {
             });
         }
 
-        const map = new Map({
+        if (!hoveredRouteStepSourceRef.current) {
+            hoveredRouteStepSourceRef.current = new VectorSource();
+            hoveredRouteStepLayerRef.current = new VectorLayer({
+                source: hoveredRouteStepSourceRef.current,
+                zIndex: 1000,
+            });
+        }
+
+        const map = new OlMap({
             target: mapRef.current,
             layers: [
                 new TileLayer({
@@ -97,6 +439,7 @@ const MainMap = () => {
                     }),
                 }),
                 routeLayerRef.current,
+                hoveredRouteStepLayerRef.current,
             ],
             view: new View({
                 center: fromLonLat([127.0, 37.5]),
@@ -107,7 +450,7 @@ const MainMap = () => {
 
         const updateZoomLevel = () => {
             const view = map.getView();
-            setZoomLevel((prev) => Math.round(view.getZoom()));
+            setZoomLevel(Math.round(view.getZoom()));
         };
 
         const keys = [];
@@ -145,12 +488,16 @@ const MainMap = () => {
             const feature = map.forEachFeatureAtPixel(
                 e.pixel,
                 (feature) => {
-                    return feature;
+                    return feature.get("routeInfo") || feature.get("storeInfo") ? feature : null;
                 },
                 { hitTolerance: 3 },
             );
 
-            if (feature) {
+            if (feature?.get("routeInfo")) {
+                dispatch(selectRoute(feature.get("routeInfo")));
+                overlay.setPosition(undefined);
+                setOverlayVisibleInfo(null);
+            } else if (feature?.get("storeInfo")) {
                 const coordinates = feature.getGeometry().getCoordinates();
                 overlay.setPosition(coordinates);
                 setOverlayVisibleInfo(feature.get("storeInfo"));
@@ -167,21 +514,125 @@ const MainMap = () => {
             map.setTarget(null);
             keys.forEach((key) => unByKey(key));
         };
-    }, []);
+    }, [dispatch]);
 
     useEffect(() => {
-        if (routeResultState.routeList == null || routeResultState.routeList.length == 0) return;
         const map = mapRef.current;
-        const routeCoordinates = routeResultState.routeList.map((coordinate) => fromLonLat([coordinate.longitude, coordinate.latitude]));
-        map.getView().fit(new LineString(routeCoordinates).getExtent(), {
+        const routeLines = getRouteLines(routeResultState);
+
+        if (!map || routeLines.length === 0) return;
+
+        map.getView().fit(new MultiLineString(routeLines).getExtent(), {
             padding: [100, 100, 100, 100],
             duration: 500,
         });
-    }, [mapRef, routeResultState]);
+    }, [routeResultState]);
 
-    const routeList = !isRouteTraceMode ? routeResultState.routeList : traceRouteResultState.traceRoutes;
-    const mode = !isRouteTraceMode ? "route" : "trace";
-    useRouteAnimation(routeList, routeSourceRef.current, mode);
+    useEffect(() => {
+        const routeSource = routeSourceRef.current;
+
+        if (!routeSource) return;
+
+        routeSource.clear();
+
+        if (!isRouteTraceMode) {
+            const routeItems = getRouteRenderItems(routeResultState);
+            const routeStepFeatures = getRouteStepFeatures(routeResultState).map(createRouteStepFeature);
+
+            routeItems.forEach((routeItem) => {
+                routeSource.addFeature(createLineFeature(new LineString(routeItem.lineCoordinates), "#60a5fa", 4, { routeInfo: routeItem.routeInfo }));
+            });
+
+            if (routeStepFeatures.length > 0) {
+                routeSource.addFeatures(routeStepFeatures);
+            }
+
+            return;
+        }
+
+        const traceLinesBySearchSide = getTraceLinesBySearchSide(traceRouteResultState.traceRoutes);
+        const finalRouteLine = toMapLineCoordinates(getRouteCoordinates(traceRouteResultState));
+        const traceRouteInfo = createRouteInfo(
+            {
+                start: traceRouteResultState.start,
+                end: traceRouteResultState.end,
+                routeSteps: traceRouteResultState.routeSteps,
+                traceRoutes: traceRouteResultState.traceRoutes,
+                searchTime: traceRouteResultState.searchTime,
+            },
+            0,
+            "trace",
+        );
+
+        if (traceLinesBySearchSide.FORWARD.length > 0) {
+            routeSource.addFeature(createLineFeature(new MultiLineString(traceLinesBySearchSide.FORWARD), "#2dd4bf", 2));
+        }
+
+        if (traceLinesBySearchSide.REVERSE.length > 0) {
+            routeSource.addFeature(createLineFeature(new MultiLineString(traceLinesBySearchSide.REVERSE), "#fb923c", 2));
+        }
+
+        if (traceLinesBySearchSide.OVERLAP.length > 0) {
+            routeSource.addFeature(createLineFeature(new MultiLineString(traceLinesBySearchSide.OVERLAP), "#fb7185", 3));
+        }
+
+        if (finalRouteLine.length > 0) {
+            routeSource.addFeature(createLineFeature(new LineString(finalRouteLine), "#38bdf8", 4, { routeInfo: traceRouteInfo }));
+        }
+
+        const tracePointFeatures = [
+            isValidCoordinate(traceRouteResultState.start)
+                ? createRouteStepFeature({
+                      coordinate: toMapCoordinate(traceRouteResultState.start),
+                      turnDirection: "START",
+                      routeInfo: traceRouteInfo,
+                      routeIndex: 0,
+                      stepIndex: 0,
+                  })
+                : null,
+            isValidCoordinate(traceRouteResultState.end)
+                ? createRouteStepFeature({
+                      coordinate: toMapCoordinate(traceRouteResultState.end),
+                      turnDirection: "END",
+                      routeInfo: traceRouteInfo,
+                      routeIndex: 0,
+                      stepIndex: finalRouteLine.length - 1,
+                  })
+                : null,
+        ].filter(Boolean);
+
+        if (tracePointFeatures.length > 0) {
+            routeSource.addFeatures(tracePointFeatures);
+        }
+    }, [isRouteTraceMode, routeResultState, traceRouteResultState]);
+
+    useEffect(() => {
+        const hoveredRouteStepSource = hoveredRouteStepSourceRef.current;
+
+        if (!hoveredRouteStepSource) return;
+
+        hoveredRouteStepSource.clear();
+
+        const hoveredFeature = createHoveredRouteStepFeature(hoveredRouteStep);
+
+        if (hoveredFeature) {
+            hoveredRouteStepSource.addFeature(hoveredFeature);
+        }
+    }, [hoveredRouteStep]);
+
+    useEffect(() => {
+        if (!isValidCoordinate(focusedRouteStep?.coordinate)) return;
+
+        const map = mapRef.current;
+
+        if (!map) return;
+
+        map.getView().animate({
+            center: toMapCoordinate(focusedRouteStep.coordinate),
+            zoom: Math.max(map.getView().getZoom() ?? 16, 16),
+            duration: 400,
+        });
+    }, [focusedRouteStep]);
 
     const handleContextItemClick = () => {
         setMenuConfig((prev) => ({ ...prev, isVisible: false }));
@@ -193,7 +644,7 @@ const MainMap = () => {
         if (view) {
             const zoom = view.getZoom();
             view.animate({ zoom: zoom + 1, duration: 250 });
-            setZoomLevel((prev) => Math.round(view.getZoom()));
+            setZoomLevel(Math.round(view.getZoom()));
         }
     };
 
@@ -203,7 +654,7 @@ const MainMap = () => {
         if (view) {
             const zoom = view.getZoom();
             view.animate({ zoom: zoom - 1, duration: 250 });
-            setZoomLevel((prev) => Math.round(view.getZoom()));
+            setZoomLevel(Math.round(view.getZoom()));
         }
     };
 
@@ -406,8 +857,8 @@ const MainMap = () => {
             duration: 500,
         });
 
-        setOverlayVisibleInfo(selectedRestaurant);
         overlayRef.current.setPosition(coordinates);
+        queueMicrotask(() => setOverlayVisibleInfo(selectedRestaurant));
     }, [selectedRestaurant]);
 
     return (

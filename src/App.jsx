@@ -1,8 +1,8 @@
 import { useState } from "react";
 import MainMap from "./components/MainMap";
+import RouteSidebar from "./components/RouteSidebar";
 import Sidebar from "./components/Sidebar";
 import { LuArrowRightFromLine } from "react-icons/lu";
-import FoodOverlay from "./components/map/FoodOverlay";
 
 function App() {
     const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -10,6 +10,7 @@ function App() {
     return (
         <>
             <Sidebar sidebarOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+            <RouteSidebar />
 
             <div className="z-10 absolute left-0 top-1/2 transform -translate-y-1/2">
                 {!sidebarOpen && (
