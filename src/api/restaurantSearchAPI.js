@@ -23,12 +23,11 @@ export const searchRestaurants = (pageInfo, keyword, category, boundingBox) => {
         }
     });
 
-    const params = `page=${pageInfo.page}&size=${pageInfo.size}&keyword=${keyword}&category=${category}`;
-    return defaultAxios.get(`/api/foodstores/search?${requestParams}`);
+    return defaultAxios.get(`/api/restaurants/search?${requestParams}`);
 };
 
 export const searchRestaurantsByCategory = (pageInfo, category) => {
     const params = `page=${pageInfo.page}&size=${pageInfo.size}`;
-    return defaultAxios.get(`/api/foodstores/category/${category}?${params}`);
+    return defaultAxios.get(`/api/restaurants/category/${category}?${params}`);
 }
 

@@ -800,19 +800,29 @@ const MainMap = () => {
 
     // 음식점 검색 후 마커 표시
     useEffect(() => {
-        if (foodStoresState.length === 0) return;
+        const features = foodStoresState.flatMap((store) => {
+            const x = Number(store?.x);
+            const y = Number(store?.y);
 
-        const features = foodStoresState.map((store) => {
-            if (store.x && store.y) {
-                const coordi = transform([store.x, store.y], "EPSG:5174", "EPSG:3857");
-                return new Feature({
-                    geometry: new Point(coordi),
+            if (!Number.isFinite(x) || !Number.isFinite(y)) return [];
+
+            const coordinate = transform([x, y], "EPSG:5174", "EPSG:3857");
+            if (!coordinate.every(Number.isFinite)) return [];
+
+            return [
+                new Feature({
+                    geometry: new Point(coordinate),
                     storeInfo: store,
-                });
-            }
-
-            return null;
+                }),
+            ];
         });
+
+        if (storesSourceRef.current) {
+            storesSourceRef.current.clear();
+        }
+
+        if (features.length === 0) return;
+
         const markerStyle = new Style({
             image: new Icon({
                 src: `/map-pin-green.svg`,
@@ -822,7 +832,6 @@ const MainMap = () => {
         });
 
         if (storesSourceRef.current) {
-            storesSourceRef.current.clear();
             storesSourceRef.current.addFeatures(features);
         } else {
             storesSourceRef.current = new VectorSource({
