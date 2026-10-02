@@ -12,6 +12,7 @@ import { fromLonLat, toLonLat, transform, transformExtent } from "ol/proj";
 import { GeoJSON } from "ol/format";
 import { bbox } from "ol/loadingstrategy";
 import VectorLayer from "ol/layer/Vector";
+import VectorImageLayer from "ol/layer/VectorImage";
 import Icon from "ol/style/Icon";
 import { LuMap } from "react-icons/lu";
 import { unByKey } from "ol/Observable";
@@ -202,7 +203,9 @@ const getTraceLinesBySearchSide = (traceRoutes = []) => {
 
         addCoordinateSide(coordinateSides, parentCoordinate, searchSide);
 
-        visitedCoordinates.filter(isValidCoordinate).forEach((visitedCoordinate) => {
+        visitedCoordinates.forEach((visitedCoordinate) => {
+            if (!isValidCoordinate(visitedCoordinate)) return;
+
             const lineKey = getLineKey(parentCoordinate, visitedCoordinate);
 
             addCoordinateSide(coordinateSides, visitedCoordinate, searchSide);
@@ -375,6 +378,8 @@ const MainMap = () => {
     const [isRouteTraceMode, setRouteTraceMode] = useState(false);
     const routeSourceRef = useRef(null);
     const routeLayerRef = useRef(null);
+    const traceSourceRef = useRef(null);
+    const traceLayerRef = useRef(null);
     const hoveredRouteStepSourceRef = useRef(null);
     const hoveredRouteStepLayerRef = useRef(null);
     const storesSourceRef = useRef(null);
@@ -401,6 +406,15 @@ const MainMap = () => {
             routeSourceRef.current = new VectorSource();
             routeLayerRef.current = new VectorLayer({
                 source: routeSourceRef.current,
+            });
+        }
+
+        if (!traceSourceRef.current) {
+            traceSourceRef.current = new VectorSource();
+            traceLayerRef.current = new VectorImageLayer({
+                source: traceSourceRef.current,
+                imageRatio: 1,
+                renderBuffer: 4,
             });
         }
 
@@ -438,6 +452,7 @@ const MainMap = () => {
                         strategy: bbox,
                     }),
                 }),
+                traceLayerRef.current,
                 routeLayerRef.current,
                 hoveredRouteStepLayerRef.current,
             ],
@@ -490,7 +505,10 @@ const MainMap = () => {
                 (feature) => {
                     return feature.get("routeInfo") || feature.get("storeInfo") ? feature : null;
                 },
-                { hitTolerance: 3 },
+                {
+                    hitTolerance: 3,
+                    layerFilter: (layer) => layer !== traceLayerRef.current,
+                },
             );
 
             if (feature?.get("routeInfo")) {
@@ -530,10 +548,12 @@ const MainMap = () => {
 
     useEffect(() => {
         const routeSource = routeSourceRef.current;
+        const traceSource = traceSourceRef.current;
 
-        if (!routeSource) return;
+        if (!routeSource || !traceSource) return;
 
         routeSource.clear();
+        traceSource.clear();
 
         if (!isRouteTraceMode) {
             const routeItems = getRouteRenderItems(routeResultState);
@@ -565,15 +585,15 @@ const MainMap = () => {
         );
 
         if (traceLinesBySearchSide.FORWARD.length > 0) {
-            routeSource.addFeature(createLineFeature(new MultiLineString(traceLinesBySearchSide.FORWARD), "#2dd4bf", 2));
+            traceSource.addFeature(createLineFeature(new MultiLineString(traceLinesBySearchSide.FORWARD), "#2dd4bf", 2));
         }
 
         if (traceLinesBySearchSide.REVERSE.length > 0) {
-            routeSource.addFeature(createLineFeature(new MultiLineString(traceLinesBySearchSide.REVERSE), "#fb923c", 2));
+            traceSource.addFeature(createLineFeature(new MultiLineString(traceLinesBySearchSide.REVERSE), "#fb923c", 2));
         }
 
         if (traceLinesBySearchSide.OVERLAP.length > 0) {
-            routeSource.addFeature(createLineFeature(new MultiLineString(traceLinesBySearchSide.OVERLAP), "#fb7185", 3));
+            traceSource.addFeature(createLineFeature(new MultiLineString(traceLinesBySearchSide.OVERLAP), "#fb7185", 3));
         }
 
         if (finalRouteLine.length > 0) {
