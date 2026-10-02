@@ -35,6 +35,10 @@ const routeSearchSlice = createSlice({
         selectedRoute: null,
         hoveredRouteStep: null,
         focusedRouteStep: null,
+        loading: {
+            findRoute: false,
+            traceRoute: false,
+        },
     },
     reducers: {
         selectRoute: (state, action) => {
@@ -56,18 +60,33 @@ const routeSearchSlice = createSlice({
         },
     },
     extraReducers: (builder) => {
-        builder.addCase(findRoute.fulfilled, (state, action) => {
-            state.routeResult = action.payload;
-            state.selectedRoute = null;
-            state.hoveredRouteStep = null;
-            state.focusedRouteStep = null;
-        });
-        builder.addCase(traceRoute.fulfilled, (state, action) => {
-            state.traceRouteResult = action.payload;
-            state.selectedRoute = null;
-            state.hoveredRouteStep = null;
-            state.focusedRouteStep = null;
-        });
+        builder
+            .addCase(findRoute.pending, (state) => {
+                state.loading.findRoute = true;
+            })
+            .addCase(findRoute.fulfilled, (state, action) => {
+                state.loading.findRoute = false;
+                state.routeResult = action.payload;
+                state.selectedRoute = null;
+                state.hoveredRouteStep = null;
+                state.focusedRouteStep = null;
+            })
+            .addCase(findRoute.rejected, (state) => {
+                state.loading.findRoute = false;
+            })
+            .addCase(traceRoute.pending, (state) => {
+                state.loading.traceRoute = true;
+            })
+            .addCase(traceRoute.fulfilled, (state, action) => {
+                state.loading.traceRoute = false;
+                state.traceRouteResult = action.payload;
+                state.selectedRoute = null;
+                state.hoveredRouteStep = null;
+                state.focusedRouteStep = null;
+            })
+            .addCase(traceRoute.rejected, (state) => {
+                state.loading.traceRoute = false;
+            });
     },
 });
 

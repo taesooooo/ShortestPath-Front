@@ -24,6 +24,7 @@ import { findRoute, selectRoute, traceRoute } from "../store/routeSearchSlice";
 import Stroke from "ol/style/Stroke";
 import { searchRestaurants } from "../store/restaurantSearchSlice";
 import FoodOverlay from "./map/FoodOverlay";
+import RouteLoadingOverlay from "./map/RouteLoadingOverlay";
 
 const isValidCoordinate = (coordinate) => Number.isFinite(coordinate?.longitude) && Number.isFinite(coordinate?.latitude);
 
@@ -905,6 +906,7 @@ const MainMap = () => {
             <div>
                 <FoodOverlay ref={overlayElementRef} visibleInfo={overlayVisibleInfo} onStartMarker={handleStartMarker} onEndMarker={handleEndMarker} />
             </div>
+            <RouteLoadingOverlay />
         </div>
     );
 };

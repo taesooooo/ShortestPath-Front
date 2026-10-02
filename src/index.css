@@ -25,3 +25,61 @@
   width: 100%;
   height: 100%;
 }
+
+@keyframes route-progress {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(210%);
+  }
+}
+
+@keyframes route-dot {
+  0% {
+    left: 24%;
+    opacity: 0;
+  }
+  15%, 85% {
+    opacity: 1;
+  }
+  100% {
+    left: 72%;
+    opacity: 0;
+  }
+}
+
+@keyframes loading-bounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  30% {
+    transform: translateY(-5px);
+    opacity: 1;
+  }
+}
+
+.route-loading-progress {
+  animation: route-progress 1.45s ease-in-out infinite;
+}
+
+.route-loading-dot {
+  animation: route-dot 1.8s ease-in-out infinite;
+}
+
+.loading-bounce {
+  animation: loading-bounce 1.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-loading-progress,
+  .route-loading-dot,
+  .loading-bounce {
+    animation: none;
+  }
+
+  .route-loading-progress {
+    width: 100%;
+  }
+}
